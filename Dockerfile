@@ -4,7 +4,6 @@ WORKDIR /build
 
 COPY . .
 
-#RUN go build -o goecho -mod=vedor -tags musl ./cmd/goecho
 RUN go build -o goecho -mod=vendor -tags musl ./cmd/goecho
 
 FROM golang:1.15.5
