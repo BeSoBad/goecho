@@ -4,14 +4,14 @@ WORKDIR /build
 
 COPY . .
 
-RUN go build -o goecho -mod=vendor -tags musl ./cmd/goecho
+RUN go build -o echo -mod=vendor -tags musl ./cmd/echo
 
 FROM golang:1.15.5
 
 RUN mkdir /app 
 WORKDIR /app
 
-COPY --from=builder /build/goecho /app/goecho
+COPY --from=builder /build/echo /app/echo
 
 COPY docker-entrypoint.sh .
 

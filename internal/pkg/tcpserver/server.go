@@ -4,25 +4,18 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/BeSoBad/goecho/internal/pkg/interfaces"
 	log "github.com/sirupsen/logrus"
 )
 
 const (
-	ModuleName = "tcp_server"
+	ModuleName     = "tcp_server"
+	CloseMessage   = "\nserver closed the connection\n"
+	defaultTimeout = 1 * time.Second
 )
-
-type TCPMessageHandler = func(data []byte) []byte
-
-func EchoHandler(data []byte) []byte {
-	return data
-}
-
-type IServer interface {
-	Start()
-	Stop()
-}
 
 type Config struct {
 	Host       string
@@ -39,12 +32,21 @@ type Server struct {
 	listener net.Listener
 
 	mu      sync.RWMutex
+	wg      sync.WaitGroup
 	started chan struct{}
-	closed  chan struct{}
+	stopped chan struct{}
+
+	connCount uint32
 }
 
 func New(config *Config, logger *log.Logger) *Server {
-	return &Server{host: config.Host, port: config.Port, bufferSize: config.BufferSize,
+	return &Server{
+		host:       config.Host,
+		port:       config.Port,
+		bufferSize: config.BufferSize,
+		started:    make(chan struct{}),
+		stopped:    make(chan struct{}),
+
 		logger: logger.WithFields(log.Fields{
 			"module": ModuleName,
 		})}
@@ -61,59 +63,73 @@ func (s *Server) Start() error {
 	}
 	s.listener = listener
 
-	s.logger.Info("Listening to connections at '"+s.host+"' on port ", strconv.Itoa(int(s.port)))
+	s.logger.Infof("TCP server started listening connections [host: %s] [port: %s]", s.host, strconv.Itoa(int(s.port)))
+	close(s.started)
 	return nil
 }
 
-func (s *Server) Accept(handler TCPMessageHandler) error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	conn, err := s.listener.Accept()
-	if err != nil {
-		s.logger.Error("Error while accepting:", err)
-		return ErrAccept
-	}
-
-	s.logger.Info("New connection accepted: ", conn.RemoteAddr())
-	go s.startReading(conn, handler)
-
-	return nil
-}
-
-func (s *Server) Stop() error {
+func (s *Server) Shutdown() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	close(s.stopped)
+	s.wg.Wait()
 	err := s.listener.Close()
 	if err != nil {
-		s.logger.Error("Error while closing server:", err)
+		s.logger.Error("Error while closing TCP listener:", err)
 		return ErrClose
 	}
 
-	close(s.closed)
 	return nil
 }
 
-func (s *Server) startReading(conn net.Conn, handler TCPMessageHandler) {
+func (s *Server) Accept(handler interfaces.MessageHandler) error {
+	select {
+	case <-s.stopped:
+		return ErrServerStopped
+	default:
+	}
+
+	select {
+	case <-s.started:
+		conn, err := s.listener.Accept()
+		if err != nil {
+			s.logger.Error("Error while accepting TCP connection:", err)
+			return ErrAccept
+		}
+
+		connID := atomic.AddUint32(&s.connCount, 1)
+		s.wg.Add(1)
+		s.logger.Infof("New connection is accepted [id: %d] [addr: %s]", connID, conn.RemoteAddr())
+		go s.startReading(conn, handler, connID)
+	default:
+		return ErrServerNotStarted
+	}
+
+	return nil
+}
+
+func (s *Server) startReading(conn net.Conn, handler interfaces.MessageHandler, connID uint32) {
+	defer s.wg.Done()
 	defer conn.Close()
-	defer s.logger.Println("Closed connection.")
+	defer atomic.StoreUint32(&s.connCount, atomic.LoadUint32(&s.connCount)-1)
+	defer s.logger.Infof("Closing connection [id: %d]", connID)
 
 	for {
 		buf := make([]byte, s.bufferSize)
-		conn.SetReadDeadline(time.Now().Add(time.Second * 2))
+		conn.SetReadDeadline(time.Now().Add(defaultTimeout))
 		size, err := conn.Read(buf)
 		if err != nil {
 			select {
-			case <-s.closed:
-				conn.Write([]byte("server closed the connection"))
+			case <-s.stopped:
+				conn.Write([]byte(CloseMessage))
 				return
 			default:
 				continue
 			}
 		}
 		data := handler(buf[:size])
-		s.logger.Println("Read new data from connection", data)
+		s.logger.Infof("Received data [id: %d]: %s", connID, string(data))
 		conn.Write(data)
 	}
 }
