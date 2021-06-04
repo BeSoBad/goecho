@@ -3,6 +3,7 @@ package tcpserver
 import (
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -14,6 +15,9 @@ import (
 const (
 	ModuleName     = "tcp_server"
 	CloseMessage   = "\nserver closed the connection\n"
+	EOFMessage     = "EOF"
+	TimeoutMessage = "i/o timeout"
+
 	defaultTimeout = 1 * time.Second
 )
 
@@ -58,7 +62,7 @@ func (s *Server) Start() error {
 
 	listener, err := net.Listen("tcp", s.host+":"+strconv.Itoa(int(s.port)))
 	if err != nil {
-		s.logger.Error("Error while starting listening TCP:", err)
+		s.logger.Error("Error starting listening TCP:", err)
 		return ErrStart
 	}
 	s.listener = listener
@@ -72,6 +76,7 @@ func (s *Server) Shutdown() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.logger.Infof("Stopping TCP server")
 	close(s.stopped)
 	s.wg.Wait()
 	err := s.listener.Close()
@@ -92,16 +97,26 @@ func (s *Server) Accept(handler interfaces.MessageHandler) error {
 
 	select {
 	case <-s.started:
-		conn, err := s.listener.Accept()
-		if err != nil {
-			s.logger.Error("Error while accepting TCP connection:", err)
-			return ErrAccept
-		}
+		connCh := make(chan net.Conn)
 
-		connID := atomic.AddUint32(&s.connCount, 1)
-		s.wg.Add(1)
-		s.logger.Infof("New connection is accepted [id: %d] [addr: %s]", connID, conn.RemoteAddr())
-		go s.startReading(conn, handler, connID)
+		go func(connCh chan<- net.Conn) {
+			conn, err := s.listener.Accept()
+			if err != nil {
+				s.logger.Error("Error while accepting TCP connection:", err)
+				return
+			}
+			connCh <- conn
+		}(connCh)
+
+		select {
+		case <-s.stopped:
+			return ErrServerStopped
+		case conn := <-connCh:
+			connID := atomic.AddUint32(&s.connCount, 1)
+			s.wg.Add(1)
+			s.logger.Infof("New connection accepted [id: %d] [addr: %s]", connID, conn.RemoteAddr())
+			go s.startReading(conn, handler, connID)
+		}
 	default:
 		return ErrServerNotStarted
 	}
@@ -125,7 +140,16 @@ func (s *Server) startReading(conn net.Conn, handler interfaces.MessageHandler, 
 				conn.Write([]byte(CloseMessage))
 				return
 			default:
-				continue
+				switch {
+				case err.Error() == EOFMessage:
+					s.logger.Infof("Connection dropped by user [id: %d]", connID)
+					return
+				case strings.HasSuffix(err.Error(), TimeoutMessage):
+					continue
+				default:
+					s.logger.Errorf("Reading error: %s", err.Error())
+					return
+				}
 			}
 		}
 		data := handler(buf[:size])

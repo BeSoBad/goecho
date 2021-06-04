@@ -3,7 +3,7 @@ set -e
 
 case "$1" in
     start)
-        /app/goecho "$2"
+        /app/echo "$2"
         ;;
     *)
         exec "$@"

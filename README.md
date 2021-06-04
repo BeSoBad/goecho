@@ -7,3 +7,4 @@
 - Timeout for accept connection
 - Tests
 - Benchmarks
+- Linters
