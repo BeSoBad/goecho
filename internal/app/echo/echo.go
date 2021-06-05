@@ -6,7 +6,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-type EchoApp struct {
+type App struct {
 	tcpServer interfaces.Server
 	logger    *log.Entry
 }
@@ -18,9 +18,9 @@ const (
 	defaultBufferSize = 2048
 )
 
-func New(logger *log.Logger) *EchoApp {
+func New(logger *log.Logger) *App {
 	config := tcpserver.Config{Host: defaultHost, Port: defaultPort, BufferSize: defaultBufferSize}
-	return &EchoApp{
+	return &App{
 		tcpServer: tcpserver.New(&config, logger),
 		logger: logger.WithFields(log.Fields{
 			"module": ModuleName,
@@ -28,21 +28,21 @@ func New(logger *log.Logger) *EchoApp {
 	}
 }
 
-func (e *EchoApp) Run() error {
-	e.logger.Infof("Echo app is running")
-	err := e.tcpServer.Start()
+func (a *App) Run() error {
+	a.logger.Infof("Echo app is running")
+	err := a.tcpServer.Start()
 	if err != nil {
 		return err
 	}
 	for {
-		err = e.tcpServer.Accept(EchoHandler)
+		err = a.tcpServer.Accept(tcpserver.EchoHandler)
 		if err != nil {
 			return err
 		}
 	}
 }
 
-func (e *EchoApp) Stop() error {
-	e.logger.Infof("Echo app is stopping")
-	return e.tcpServer.Shutdown()
+func (a *App) Stop() error {
+	a.logger.Infof("Echo app is stopping")
+	return a.tcpServer.Shutdown()
 }

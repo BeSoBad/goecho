@@ -5,9 +5,9 @@ import (
 )
 
 var (
-	ErrStart            = errors.New("Error while starting listening TCP connection")
-	ErrAccept           = errors.New("Accept error")
-	ErrClose            = errors.New("Err close")
-	ErrServerStopped    = errors.New("Server is stopped")
-	ErrServerNotStarted = errors.New("Server is not started")
+	ErrStart            = errors.New("error while starting listening TCP connection")
+	ErrAccept           = errors.New("accept error")
+	ErrClose            = errors.New("err close")
+	ErrServerStopped    = errors.New("server is stopped")
+	ErrServerNotStarted = errors.New("server is not started")
 )

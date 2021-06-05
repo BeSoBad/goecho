@@ -14,7 +14,7 @@ import (
 
 const (
 	ModuleName     = "tcp_server"
-	CloseMessage   = "\nserver closed the connection\n"
+	CloseMessage   = "server closed the connection\n"
 	EOFMessage     = "EOF"
 	TimeoutMessage = "i/o timeout"
 
@@ -28,19 +28,19 @@ type Config struct {
 }
 
 type Server struct {
-	host       string
-	port       uint32
-	bufferSize uint32
+	host string
 
-	logger   *log.Entry
 	listener net.Listener
+	logger   *log.Entry
 
-	mu      sync.RWMutex
-	wg      sync.WaitGroup
 	started chan struct{}
 	stopped chan struct{}
+	mu      sync.RWMutex
+	wg      sync.WaitGroup
 
-	connCount uint32
+	port       uint32
+	bufferSize uint32
+	connCount  uint32
 }
 
 func New(config *Config, logger *log.Logger) *Server {
@@ -132,12 +132,19 @@ func (s *Server) startReading(conn net.Conn, handler interfaces.MessageHandler, 
 
 	for {
 		buf := make([]byte, s.bufferSize)
-		conn.SetReadDeadline(time.Now().Add(defaultTimeout))
+		err := conn.SetReadDeadline(time.Now().Add(defaultTimeout))
+		if err != nil {
+			s.logger.Errorf("setting deadline error [id: %d]: %s", connID, err)
+			return
+		}
 		size, err := conn.Read(buf)
 		if err != nil {
 			select {
 			case <-s.stopped:
-				conn.Write([]byte(CloseMessage))
+				_, err = conn.Write([]byte(CloseMessage))
+				if err != nil {
+					s.logger.Errorf("writing close message error [id: %d]: %s", connID, err)
+				}
 				return
 			default:
 				switch {
@@ -154,6 +161,9 @@ func (s *Server) startReading(conn net.Conn, handler interfaces.MessageHandler, 
 		}
 		data := handler(buf[:size])
 		s.logger.Infof("Received data [id: %d]: %s", connID, string(data))
-		conn.Write(data)
+		_, err = conn.Write(data)
+		if err != nil {
+			s.logger.Errorf("writing message error [id: %d] [data: %s]: %s", connID, data, err)
+		}
 	}
 }
