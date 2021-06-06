@@ -1,5 +1,5 @@
 package tcpserver
 
-func EchoHandler(data []byte) []byte {
-	return data
+func EchoHandler(data []byte) ([]byte, error) {
+	return data, nil
 }

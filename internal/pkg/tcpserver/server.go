@@ -9,14 +9,16 @@ import (
 	"time"
 
 	"github.com/BeSoBad/goecho/internal/pkg/interfaces"
+	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 )
 
 const (
-	ModuleName     = "tcp_server"
-	CloseMessage   = "server closed the connection\n"
-	EOFMessage     = "EOF"
-	TimeoutMessage = "i/o timeout"
+	ModuleName              = "tcp_server"
+	CloseMessage            = "server closed the connection\n"
+	EOFMessage              = "EOF"
+	TimeoutMessage          = "i/o timeout"
+	ClosedConnectionMessage = "use of closed network connection"
 
 	defaultTimeout = 1 * time.Second
 )
@@ -33,10 +35,11 @@ type Server struct {
 	listener net.Listener
 	logger   *log.Entry
 
-	started chan struct{}
-	stopped chan struct{}
-	mu      sync.RWMutex
-	wg      sync.WaitGroup
+	started  chan struct{}
+	stopped  chan struct{}
+	mu       sync.RWMutex
+	readWg   sync.WaitGroup
+	acceptWg sync.WaitGroup
 
 	port       uint32
 	bufferSize uint32
@@ -78,8 +81,9 @@ func (s *Server) Shutdown() error {
 
 	s.logger.Infof("Stopping TCP server")
 	close(s.stopped)
-	s.wg.Wait()
+	s.readWg.Wait()
 	err := s.listener.Close()
+	s.acceptWg.Wait()
 	if err != nil {
 		s.logger.Error("Error while closing TCP listener:", err)
 		return ErrClose
@@ -99,10 +103,15 @@ func (s *Server) Accept(handler interfaces.MessageHandler) error {
 	case <-s.started:
 		connCh := make(chan net.Conn)
 
+		s.acceptWg.Add(1)
 		go func(connCh chan<- net.Conn) {
+			defer s.acceptWg.Done()
+
 			conn, err := s.listener.Accept()
 			if err != nil {
-				s.logger.Error("Error while accepting TCP connection:", err)
+				if !strings.HasSuffix(err.Error(), ClosedConnectionMessage) {
+					s.logger.Error("Error while accepting TCP connection:", err)
+				}
 				return
 			}
 			connCh <- conn
@@ -112,10 +121,11 @@ func (s *Server) Accept(handler interfaces.MessageHandler) error {
 		case <-s.stopped:
 			return ErrServerStopped
 		case conn := <-connCh:
-			connID := atomic.AddUint32(&s.connCount, 1)
-			s.wg.Add(1)
-			s.logger.Infof("New connection accepted [id: %d] [addr: %s]", connID, conn.RemoteAddr())
-			go s.startReading(conn, handler, connID)
+			atomic.AddUint32(&s.connCount, 1)
+			connID, _ := uuid.NewUUID()
+			s.readWg.Add(1)
+			s.logger.Infof("New connection accepted [id: %d] [addr: %s]", connID.ID(), conn.RemoteAddr())
+			go s.startReading(conn, handler, connID.ID())
 		}
 	default:
 		return ErrServerNotStarted
@@ -125,16 +135,21 @@ func (s *Server) Accept(handler interfaces.MessageHandler) error {
 }
 
 func (s *Server) startReading(conn net.Conn, handler interfaces.MessageHandler, connID uint32) {
-	defer s.wg.Done()
-	defer conn.Close()
+	defer s.readWg.Done()
 	defer atomic.StoreUint32(&s.connCount, atomic.LoadUint32(&s.connCount)-1)
-	defer s.logger.Infof("Closing connection [id: %d]", connID)
+	defer func() {
+		defer s.logger.Infof("Closing connection [id: %d]", connID)
+		err := conn.Close()
+		if err != nil {
+			s.logger.Errorf("Closing connection error [id: %d]: %s", connID, err)
+		}
+	}()
 
 	for {
 		buf := make([]byte, s.bufferSize)
 		err := conn.SetReadDeadline(time.Now().Add(defaultTimeout))
 		if err != nil {
-			s.logger.Errorf("setting deadline error [id: %d]: %s", connID, err)
+			s.logger.Errorf("Setting deadline error [id: %d]: %s", connID, err)
 			return
 		}
 		size, err := conn.Read(buf)
@@ -143,7 +158,7 @@ func (s *Server) startReading(conn net.Conn, handler interfaces.MessageHandler, 
 			case <-s.stopped:
 				_, err = conn.Write([]byte(CloseMessage))
 				if err != nil {
-					s.logger.Errorf("writing close message error [id: %d]: %s", connID, err)
+					s.logger.Errorf("Writing close message error [id: %d]: %s", connID, err)
 				}
 				return
 			default:
@@ -159,11 +174,14 @@ func (s *Server) startReading(conn net.Conn, handler interfaces.MessageHandler, 
 				}
 			}
 		}
-		data := handler(buf[:size])
+		data, err := handler(buf[:size])
+		if err != nil {
+			s.logger.Errorf("Handling message error [id: %d] [data: %s]: %s", connID, data, err)
+		}
 		s.logger.Infof("Received data [id: %d]: %s", connID, string(data))
 		_, err = conn.Write(data)
 		if err != nil {
-			s.logger.Errorf("writing message error [id: %d] [data: %s]: %s", connID, data, err)
+			s.logger.Errorf("Writing message error [id: %d] [data: %s]: %s", connID, data, err)
 		}
 	}
 }

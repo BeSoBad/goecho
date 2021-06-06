@@ -46,3 +46,17 @@ func TestServer_BaseScenario(t *testing.T) {
 	}()
 	wg.Wait()
 }
+
+func TestServer_StartShutdown(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	server := New(&config, logger)
+	err := server.Accept(EchoHandler)
+	require.Equal(t, ErrServerNotStarted, err)
+	err = server.Start()
+	require.NoError(t, err)
+	err = server.Shutdown()
+	require.NoError(t, err)
+	err = server.Accept(EchoHandler)
+	require.Equal(t, ErrServerStopped, err)
+}
