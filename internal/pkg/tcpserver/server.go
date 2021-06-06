@@ -164,7 +164,7 @@ func (s *Server) startReading(conn net.Conn, handler interfaces.MessageHandler, 
 			default:
 				switch {
 				case err.Error() == EOFMessage:
-					s.logger.Infof("Connection dropped by user [id: %s]", connID)
+					s.logger.Infof("Connection terminated by user [id: %s]", connID)
 					return
 				case strings.HasSuffix(err.Error(), TimeoutMessage):
 					continue

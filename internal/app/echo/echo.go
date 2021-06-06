@@ -14,7 +14,7 @@ type App struct {
 const (
 	ModuleName        = "echo_app"
 	defaultHost       = "0.0.0.0"
-	defaultPort       = 8080
+	defaultPort       = 7
 	defaultBufferSize = 2048
 )
 

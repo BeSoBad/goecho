@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	config  = Config{Host: "0.0.0.0", Port: 8080, BufferSize: 2048}
+	config  = Config{Host: "0.0.0.0", Port: 7, BufferSize: 2048}
 	address = config.Host + ":" + strconv.Itoa(int(config.Port))
 )
 
