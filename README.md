@@ -10,7 +10,7 @@
 </p>
 
 
-Asynchronous TCP server implementing [Echo Protocol](https://datatracker.ietf.org/doc/html/rfc862)
+Asynchronous TCP server implementing [Echo Protocol](https://datatracker.ietf.org/doc/html/rfc862).
 
 ## Features
 - One goroutine handles one connection.

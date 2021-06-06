@@ -86,7 +86,7 @@ func (s *Server) Shutdown() error {
 	s.acceptWg.Wait()
 	if err != nil {
 		s.logger.Error("Error while closing TCP listener:", err)
-		return ErrClose
+		return ErrShutdown
 	}
 
 	return nil
@@ -138,8 +138,12 @@ func (s *Server) startReading(conn net.Conn, handler interfaces.MessageHandler, 
 	defer s.readWg.Done()
 	defer atomic.StoreUint32(&s.connCount, atomic.LoadUint32(&s.connCount)-1)
 	defer func() {
-		defer s.logger.Infof("Closing connection [id: %s]", connID)
-		err := conn.Close()
+		s.logger.Infof("Closing connection [id: %s]", connID)
+		_, err := conn.Write([]byte(CloseMessage))
+		if err != nil {
+			s.logger.Errorf("Writing close message error [id: %s]: %s", connID, err)
+		}
+		err = conn.Close()
 		if err != nil {
 			s.logger.Errorf("Closing connection error [id: %s]: %s", connID, err)
 		}
@@ -156,10 +160,6 @@ func (s *Server) startReading(conn net.Conn, handler interfaces.MessageHandler, 
 		if err != nil {
 			select {
 			case <-s.stopped:
-				_, err = conn.Write([]byte(CloseMessage))
-				if err != nil {
-					s.logger.Errorf("Writing close message error [id: %s]: %s", connID, err)
-				}
 				return
 			default:
 				switch {
@@ -174,14 +174,18 @@ func (s *Server) startReading(conn net.Conn, handler interfaces.MessageHandler, 
 				}
 			}
 		}
-		data, err := handler(buf[:size])
+		sizeBuf := buf[:size]
+		s.logger.Infof("Received data [id: %s]: %s", connID, string(sizeBuf))
+		handledBuf, err := handler(sizeBuf)
 		if err != nil {
-			s.logger.Errorf("Handling message error [id: %s] [data: %s]: %s", connID, data, err)
+			s.logger.Errorf("Handling message error [id: %s] [data: %s]: %s", connID, handledBuf, err)
+			return
 		}
-		s.logger.Infof("Received data [id: %s]: %s", connID, string(data))
-		_, err = conn.Write(data)
+		size, err = conn.Write(handledBuf)
 		if err != nil {
-			s.logger.Errorf("Writing message error [id: %s] [data: %s]: %s", connID, data, err)
+			s.logger.Errorf("Writing message error [id: %s] [data: %s]: %s", connID, handledBuf, err)
+			return
 		}
+		s.logger.Infof("Sent data [id: %s]: %s", connID, string(handledBuf[:size]))
 	}
 }
