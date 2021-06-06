@@ -124,8 +124,8 @@ func (s *Server) Accept(handler interfaces.MessageHandler) error {
 			atomic.AddUint32(&s.connCount, 1)
 			connID, _ := uuid.NewUUID()
 			s.readWg.Add(1)
-			s.logger.Infof("New connection accepted [id: %d] [addr: %s]", connID.ID(), conn.RemoteAddr())
-			go s.startReading(conn, handler, connID.ID())
+			s.logger.Infof("New connection accepted [id: %s] [addr: %s]", connID.String(), conn.RemoteAddr())
+			go s.startReading(conn, handler, connID.String())
 		}
 	default:
 		return ErrServerNotStarted
@@ -134,14 +134,14 @@ func (s *Server) Accept(handler interfaces.MessageHandler) error {
 	return nil
 }
 
-func (s *Server) startReading(conn net.Conn, handler interfaces.MessageHandler, connID uint32) {
+func (s *Server) startReading(conn net.Conn, handler interfaces.MessageHandler, connID string) {
 	defer s.readWg.Done()
 	defer atomic.StoreUint32(&s.connCount, atomic.LoadUint32(&s.connCount)-1)
 	defer func() {
-		defer s.logger.Infof("Closing connection [id: %d]", connID)
+		defer s.logger.Infof("Closing connection [id: %s]", connID)
 		err := conn.Close()
 		if err != nil {
-			s.logger.Errorf("Closing connection error [id: %d]: %s", connID, err)
+			s.logger.Errorf("Closing connection error [id: %s]: %s", connID, err)
 		}
 	}()
 
@@ -149,7 +149,7 @@ func (s *Server) startReading(conn net.Conn, handler interfaces.MessageHandler, 
 		buf := make([]byte, s.bufferSize)
 		err := conn.SetReadDeadline(time.Now().Add(defaultTimeout))
 		if err != nil {
-			s.logger.Errorf("Setting deadline error [id: %d]: %s", connID, err)
+			s.logger.Errorf("Setting deadline error [id: %s]: %s", connID, err)
 			return
 		}
 		size, err := conn.Read(buf)
@@ -158,13 +158,13 @@ func (s *Server) startReading(conn net.Conn, handler interfaces.MessageHandler, 
 			case <-s.stopped:
 				_, err = conn.Write([]byte(CloseMessage))
 				if err != nil {
-					s.logger.Errorf("Writing close message error [id: %d]: %s", connID, err)
+					s.logger.Errorf("Writing close message error [id: %s]: %s", connID, err)
 				}
 				return
 			default:
 				switch {
 				case err.Error() == EOFMessage:
-					s.logger.Infof("Connection dropped by user [id: %d]", connID)
+					s.logger.Infof("Connection dropped by user [id: %s]", connID)
 					return
 				case strings.HasSuffix(err.Error(), TimeoutMessage):
 					continue
@@ -176,12 +176,12 @@ func (s *Server) startReading(conn net.Conn, handler interfaces.MessageHandler, 
 		}
 		data, err := handler(buf[:size])
 		if err != nil {
-			s.logger.Errorf("Handling message error [id: %d] [data: %s]: %s", connID, data, err)
+			s.logger.Errorf("Handling message error [id: %s] [data: %s]: %s", connID, data, err)
 		}
-		s.logger.Infof("Received data [id: %d]: %s", connID, string(data))
+		s.logger.Infof("Received data [id: %s]: %s", connID, string(data))
 		_, err = conn.Write(data)
 		if err != nil {
-			s.logger.Errorf("Writing message error [id: %d] [data: %s]: %s", connID, data, err)
+			s.logger.Errorf("Writing message error [id: %s] [data: %s]: %s", connID, data, err)
 		}
 	}
 }
