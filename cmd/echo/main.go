@@ -14,6 +14,7 @@ import (
 
 func main() {
 	logger := logrus.New()
+	logger.Level = logrus.DebugLevel
 	app := echo.New(logger)
 
 	wg := sync.WaitGroup{}

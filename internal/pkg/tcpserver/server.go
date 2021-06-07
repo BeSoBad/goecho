@@ -197,7 +197,7 @@ func (s *Server) startReading(conn net.Conn, handler interfaces.MessageHandler, 
 			}
 		}
 		sizeBuf := buf[:size]
-		s.logger.Infof("Received data [id: %s]: %s", connID, string(sizeBuf))
+		s.logger.Debugf("Received data [id: %s]: %s", connID, string(sizeBuf))
 		handledBuf, err := handler(sizeBuf)
 		if err != nil {
 			s.logger.Errorf("Handling message error [id: %s] [data: %s]: %s", connID, handledBuf, err)
@@ -208,6 +208,6 @@ func (s *Server) startReading(conn net.Conn, handler interfaces.MessageHandler, 
 			s.logger.Errorf("Writing message error [id: %s] [data: %s]: %s", connID, handledBuf, err)
 			return
 		}
-		s.logger.Infof("Sent data [id: %s]: %s", connID, string(handledBuf[:size]))
+		s.logger.Debugf("Sent data [id: %s]: %s", connID, string(handledBuf[:size]))
 	}
 }
