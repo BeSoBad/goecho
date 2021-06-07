@@ -105,10 +105,25 @@ func TestServer_StartShutdown(t *testing.T) {
 	server := New(&config, logger)
 	err := server.Accept(EchoHandler)
 	require.Equal(t, ErrServerNotStarted, err)
+
+	err = server.Shutdown()
+	require.Equal(t, ErrServerNotStarted, err)
+
 	err = server.Start()
 	require.NoError(t, err)
+
+	err = server.Start()
+	require.Equal(t, ErrServerStarted, err)
+
 	err = server.Shutdown()
 	require.NoError(t, err)
+
+	err = server.Shutdown()
+	require.Equal(t, ErrServerStopped, err)
+
+	err = server.Start()
+	require.Equal(t, ErrServerStopped, err)
+
 	err = server.Accept(EchoHandler)
 	require.Equal(t, ErrServerStopped, err)
 }

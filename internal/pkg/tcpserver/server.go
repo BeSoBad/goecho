@@ -63,33 +63,55 @@ func (s *Server) Start() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	listener, err := net.Listen("tcp", s.host+":"+strconv.Itoa(int(s.port)))
-	if err != nil {
-		s.logger.Error("Error starting listening TCP:", err)
-		return ErrStart
+	select {
+	case <-s.stopped:
+		return ErrServerStopped
+	default:
 	}
-	s.listener = listener
 
-	s.logger.Infof("TCP server started listening connections [host: %s] [port: %s]", s.host, strconv.Itoa(int(s.port)))
-	close(s.started)
-	return nil
+	select {
+	case <-s.started:
+		return ErrServerStarted
+	default:
+		listener, err := net.Listen("tcp", s.host+":"+strconv.Itoa(int(s.port)))
+		if err != nil {
+			s.logger.Error("Error starting listening TCP:", err)
+			return ErrStart
+		}
+		s.listener = listener
+
+		s.logger.Infof("TCP server started listening connections [host: %s] [port: %s]", s.host, strconv.Itoa(int(s.port)))
+		close(s.started)
+		return nil
+	}
 }
 
 func (s *Server) Shutdown() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.logger.Infof("Stopping TCP server")
-	close(s.stopped)
-	s.readWg.Wait()
-	err := s.listener.Close()
-	s.acceptWg.Wait()
-	if err != nil {
-		s.logger.Error("Error while closing TCP listener:", err)
-		return ErrShutdown
+	select {
+	case <-s.stopped:
+		return ErrServerStopped
+	default:
 	}
 
-	return nil
+	select {
+	case <-s.started:
+		s.logger.Infof("Stopping TCP server")
+		close(s.stopped)
+		s.readWg.Wait()
+		err := s.listener.Close()
+		s.acceptWg.Wait()
+		if err != nil {
+			s.logger.Error("Error while closing TCP listener:", err)
+			return ErrShutdown
+		}
+
+		return nil
+	default:
+		return ErrServerNotStarted
+	}
 }
 
 func (s *Server) Accept(handler interfaces.MessageHandler) error {
